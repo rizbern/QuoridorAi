@@ -3,21 +3,18 @@ import random
 
 BOARD_SIZE = 9
 
-
 class Board:
     def __init__(self):
-        # Pawns: player 1 starts bottom-middle, player 2 starts top-middle
-        # Coordinates are (row, col) — row 0 is top, row 8 is bottom
         self.pawns = {
             1: (8, 4),
             2: (0, 4)
         }
 
-        # Walls stored as (row, col, orientation)
-        # "H" = horizontal wall: blocks movement between row and row+1
-        # "V" = vertical wall:   blocks movement between col and col+1
+        # (row, col, orientation)
+        # "H" blocks movement between row and row+1
+        # "V" blocks movement between col and col+1
         # (row, col) is the TOP-LEFT corner of the 2-cell wall segment
-        self.walls = set()
+        self.walls = set() # Actuall wall placed loc
 
         self.remaining_walls = {
             1: 10,
@@ -27,34 +24,20 @@ class Board:
         # Track whose turn it is
         self.current_player = self.select_starting_player()
 
-    # -------------------------------------------------------------------------
-    # Setup
-    # -------------------------------------------------------------------------
-
     def select_starting_player(self):
         return random.randint(1, 2)
 
     def clone(self):
-        """Deep copy the board for MCTS simulations."""
+        # copying board for mcts sim
         return copy.deepcopy(self)
 
-    # -------------------------------------------------------------------------
-    # Boundary check
-    # -------------------------------------------------------------------------
-
     def is_inside(self, row, col):
-        """Returns True if (row, col) is within the 9x9 grid."""
+        # return through if within the 9x9 board
         return 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE
-
-    # -------------------------------------------------------------------------
-    # Wall blocking logic
-    # -------------------------------------------------------------------------
 
     def is_wall_between(self, r1, c1, r2, c2):
         """
-        Returns True if there is a wall blocking movement between
-        adjacent cells (r1,c1) and (r2,c2).
-
+        returns true for followwing cases:
         For a HORIZONTAL wall (row, col, "H"):
             Blocks movement between (row, col)<->(row+1, col)
                                 and (row, col+1)<->(row+1, col+1)
@@ -163,7 +146,7 @@ class Board:
         if not (0 <= row <= BOARD_SIZE - 2 and 0 <= col <= BOARD_SIZE - 2):
             return False
 
-        # Already occupied
+        # Already occupied (CHeck if wall already is placed there)
         if (row, col, orientation) in self.walls:
             return False
 
@@ -192,7 +175,7 @@ class Board:
         p2_ok = self._bfs_has_path(2)
         self.walls.remove((row, col, orientation))
 
-        return p1_ok and p2_ok
+        return p1_ok and p2_ok # if either false, then theres no path
 
     def _bfs_has_path(self, player):
         """
@@ -212,14 +195,14 @@ class Board:
             row, col = queue.pop(0)
 
             if row == goal_row:
-                return True
+                return True # path exists, can palce wall
 
             for neighbor in self.get_neighbors(row, col):
                 if neighbor not in visited:
                     visited.add(neighbor)
                     queue.append(neighbor)
 
-        return False
+        return False # no path
 
     def bfs_distance(self, player):
         """

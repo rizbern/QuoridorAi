@@ -1,13 +1,11 @@
-# backend/api 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from board import Board
+from mcts import MCTS
 
 app = FastAPI()
 
-# Runs everytime requests are made -> middleman
-# Cross-Origin Resource Sharing
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,76 +13,85 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-board = Board()
+board  = Board()
+ai     = MCTS(simulations=1000)   # AI plays as player 2
 
-# Player moves section
+
+# ─────────────────────────────────────────────
+# Request models
+# ─────────────────────────────────────────────
 
 class PawnMoveRequest(BaseModel):
-    player: int          # 1 or 2
-    position: list[int]  # [row, col] format
+    player: int
+    position: list[int]   # [row, col]
 
-# { "player": 1, "row": 3, "col": 4, "orientation": "H" }
 class WallMoveRequest(BaseModel):
-    player: int          # 1 or 2
+    player: int
     row: int
     col: int
-    orientation: str     # "H" or "V"
+    orientation: str      # "H" or "V"
 
-# defined in board.py
+
+# ─────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────
+
 def serialize_board(b: Board) -> dict:
-    # Convert to json
     return {
-        "pawns": {str(k): list(v) for k, v in b.pawns.items()},
-        # Each wall is (row, col, orientation) — convert tuple to list
-        "walls": [list(w) for w in b.walls],
+        "pawns":           {str(k): list(v) for k, v in b.pawns.items()},
+        "walls":           [list(w) for w in b.walls],
         "remaining_walls": b.remaining_walls,
-        "current_player": b.current_player,
-        "winner": b.get_winner(),
-        "is_terminal": b.is_terminal(),
+        "current_player":  b.current_player,
+        "winner":          b.get_winner(),
+        "is_terminal":     b.is_terminal(),
     }
 
 def check_turn(player: int):
-    """Raises 400 if it's not this player's turn."""
     if board.current_player != player:
         raise HTTPException(
             status_code=400,
             detail=f"It is player {board.current_player}'s turn, not player {player}'s."
         )
 
+
+# ─────────────────────────────────────────────
 # Endpoints
+# ─────────────────────────────────────────────
 
 @app.get("/")
 def root():
     return {"message": "Quoridor API running"}
 
+
 @app.get("/state")
 def get_state():
-    # Returns the current board state.
     return serialize_board(board)
+
 
 @app.post("/move/pawn")
 def pawn_move(req: PawnMoveRequest):
-    # Move a pawn to a new position.
-    # Body: { "player": 1, "position": [row, col] }
+    """Human player moves their pawn. AI responds automatically."""
     if board.is_terminal():
         return serialize_board(board)
 
     check_turn(req.player)
 
-    position = tuple(req.position)
-    success = board.move_pawn(req.player, position)
-
-    # Checks if move is valid
+    # --- Human move ---
+    success = board.move_pawn(req.player, tuple(req.position))
     if not success:
         raise HTTPException(status_code=400, detail="Invalid pawn move.")
 
+    # --- AI responds immediately if game is still running ---
+    if not board.is_terminal():
+        ai_move = ai.get_best_move(board)
+        board.apply_move(2, ai_move)
+
     return serialize_board(board)
+
 
 @app.post("/move/wall")
 def wall_move(req: WallMoveRequest):
-    # Place a wall on the board.
-    # Body: { "player": 1, "row": 3, "col": 4, "orientation": "H" }
-
+    """Human player places a wall. AI responds automatically."""
     if board.is_terminal():
         return serialize_board(board)
 
@@ -94,37 +101,29 @@ def wall_move(req: WallMoveRequest):
         raise HTTPException(status_code=400, detail="Orientation must be 'H' or 'V'.")
 
     success = board.place_wall(req.player, req.row, req.col, req.orientation)
-
-    # Checks if move is valid
     if not success:
         raise HTTPException(status_code=400, detail="Invalid wall placement.")
 
+    # --- AI responds immediately if game is still running ---
+    if not board.is_terminal():
+        ai_move = ai.get_best_move(board)
+        board.apply_move(2, ai_move)
+
     return serialize_board(board)
+
 
 @app.get("/legal-moves/{player}")
 def legal_moves(player: int):
-
-    # Returns all legal moves for a player.
-    # Useful for highlighting valid moves in the frontend.
-    
     if player not in (1, 2):
         raise HTTPException(status_code=400, detail="Player must be 1 or 2.")
 
     moves = board.get_legal_moves(player)
-
-    # Serialize move tuples into JSON lists
-    serialized = []
-    for move_type, data in moves:
-        serialized.append({
-            "type": move_type, # either a move or a wall plac
-            "data": list(data) # postion
-        })
-
+    serialized = [{"type": t, "data": list(d)} for t, d in moves]
     return {"moves": serialized}
+
 
 @app.post("/reset")
 def reset_game():
-    # resets the board to a fresh game.
     global board
     board = Board()
     return serialize_board(board)
