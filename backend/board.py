@@ -1,35 +1,19 @@
-import random 
-import ast # list to text and back
-from mcts import numberOfSimulation
-
-aiPlayer = 'o'
 boardSize = 17
-numberOfSimulation = numberOfSimulation
 
-board = [
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................'),
-    list('.................')
-]
+def createBoard():
+    return [list('.' * boardSize) for _ in range(boardSize)]
 
-copyBoard = board
+wallsRemaining = {
+    'x': 10,
+    'o': 10
+}
+
+board = createBoard()
+copyBoard = [row[:] for row in board]
 
 startingPlayer = 'x'
 currentPlayer = startingPlayer
+
 
 def initializeBoard(board):
     board_with_coords = []
@@ -44,29 +28,21 @@ def initializeBoard(board):
 
         for j in range(size):
             cell = board[i][j]
-
-            # attach coordinates
             row_with_coords.append((i, j, cell))
 
-            # Pawn positions (now EVEN indices)
+            # Pawn positions (even, even)
             if i % 2 == 0 and j % 2 == 0:
                 pawn_positions.append((i, j, cell))
 
-            # Horizontal walls (odd row, even column)
+            # Horizontal wall anchors (odd row, even col)
             elif i % 2 != 0 and j % 2 == 0:
-                if j + 1 < size:  # wall between (i, j) and (i, j+1)
-                    horizontal_walls.append((
-                        (i, j),
-                        (i, j + 1)
-                    ))
+                if j + 2 < size:
+                    horizontal_walls.append((i, j))
 
-            # Vertical walls (even row, odd column)
+            # Vertical wall anchors (even row, odd col)
             elif i % 2 == 0 and j % 2 != 0:
-                if i + 1 < size:  # wall between (i, j) and (i+1, j)
-                    vertical_walls.append((
-                        (i, j),
-                        (i + 1, j)
-                    ))
+                if i + 2 < size:
+                    vertical_walls.append((i, j))
 
         board_with_coords.append(row_with_coords)
 
@@ -77,62 +53,159 @@ def initializeBoard(board):
         "vertical_walls": vertical_walls
     }
 
-# (0,0) ─ (0,1) ─ (0,2)
-#   |       |       |
-# (1,0)   (1,1)   (1,2)             (1,1) -> pawn
-#   |       |       |
-# (2,0) ─ (2,1) ─ (2,2)
-
-initGameState = initializeBoard(copyBoard)
-# print(f"pawns:  {initGameState["pawns"]}") #(even)
-# print(f"Board:  {gameState["board"]}")
-# print(f"horizontal_walls:  {gameState["horizontal_walls"]}") (odd)
-# print(f"vertical_walls:  {gameState["vertical_walls"]}") (odd)
-
 def getBoardState():
-    # get copy of the board
     return [row[:] for row in copyBoard]
 
+def placeWall(player, anchor, orientation):
+    i, j = anchor
 
-# tasK 1 -> able to place pawns in its correct position
-# pawns at even positions
+    # check wall count
+    if wallsRemaining[player] <= 0:
+        return None
 
-def placePawn(currentPlayer, pos):
-    currentBoard = getBoardState()
-    # pos -> (i,j)
-    i,j = pos
-    if i % 2 == 0 and j % 2 == 0:
-        copyBoard[i][j] = currentPlayer
-        return copyBoard
+    if not isValidWallPlacement(i, j, orientation):
+        return None
+
+    if orientation == "H":
+        copyBoard[i][j] = '-'
+        copyBoard[i][j+1] = '-'
+        copyBoard[i][j+2] = '-'
+
+    elif orientation == "V":
+        copyBoard[i][j] = '|'
+        copyBoard[i+1][j] = '|'
+        copyBoard[i+2][j] = '|'
+
+    wallsRemaining[player] -= 1
+    return copyBoard
+
+def isValidWallPlacement(i, j, orientation):
+    size = boardSize
+
+    if orientation == "H":
+        # odd row, even col
+        if not (i % 2 != 0 and j % 2 == 0):
+            print("Wrong orientation")
+            return False
+
+        if j + 2 >= size:
+            print("Out of bound friend")
+            return False
+
+        # overlap check
+        if copyBoard[i][j] != '.' or copyBoard[i][j+1] != '.' or copyBoard[i][j+2] != '.':
+            print("Can't overlap mate")
+            return False
+        
+        if copyBoard[i-1][j+1] == '|' or copyBoard[i+1][j+1] == '|':
+            return False
+
+    elif orientation == "V":
+        # even row, odd col
+        if not (i % 2 == 0 and j % 2 != 0):
+            print("Wrong orientation")
+            return False
+
+        if i + 2 >= size:
+            print("Out of bound friend")
+            return False
+
+        # overlap check
+        if copyBoard[i][j] != '.' or copyBoard[i+1][j] != '.' or copyBoard[i+2][j] != '.':
+            print("Can't overlap mate")
+            return False
+        
+        # if you try to 
+        if copyBoard[i+1][j-1] == '-' or copyBoard[i+1][j+1] == '-':
+            return False
+        
     else:
-        print("Cant place a pawn there mate")
-        return currentBoard
+        return False
+        
+
+    return True
+
+def placeWall(player, anchor, orientation):
+    i, j = anchor
+
+    if not isValidWallPlacement(i, j, orientation):
+        return None
+
+    if orientation == "H":
+        copyBoard[i][j] = '-'
+        copyBoard[i][j+1] = '-'
+        copyBoard[i][j+2] = '-'
+
+    elif orientation == "V":
+        copyBoard[i][j] = '|'
+        copyBoard[i+1][j] = '|'
+        copyBoard[i+2][j] = '|'
+
+    return copyBoard
+
+def findPawn(player):
+    for i in range(boardSize):
+        for j in range(boardSize):
+            if copyBoard[i][j] == player:
+                return (i, j)
+    return None
+
+def movePawn(player, direction):
+    opponent = 'o' if player == 'x' else 'x'
+
+    i, j = findPawn(player)
+
+    if direction == "DOWN":
+        ni, nj = i + 2, j
+
+        # check opponent in front
+        if copyBoard[i+2][j] == opponent:
+            ni = i + 4  # jump
+
+        if ni < boardSize:
+            copyBoard[i][j] = '.'
+            copyBoard[ni][nj] = player
+
+    elif direction == "UP":
+        ni, nj = i - 2, j
+
+        if copyBoard[i-2][j] == opponent:
+            ni = i - 4
+
+        if ni >= 0:
+            copyBoard[i][j] = '.'
+            copyBoard[ni][nj] = player
+
+    elif direction == "RIGHT":
+        ni, nj = i, j + 2
+
+        if copyBoard[i][j+2] == opponent:
+            nj = j + 4
+
+        if nj < boardSize:
+            copyBoard[i][j] = '.'
+            copyBoard[ni][nj] = player
+
+    elif direction == "LEFT":
+        ni, nj = i, j - 2
+
+        if copyBoard[i][j-2] == opponent:
+            nj = j - 4
+
+        if nj >= 0:
+            copyBoard[i][j] = '.'
+            copyBoard[ni][nj] = player
+
+    return copyBoard
 
 
+# placePawn('x', (0,0))
+# placePawn('o', (2,2))
+# placeWall('x', (1,0), "H")  
+# # fills: (1,0), (1,1), (1,2)
 
-#TEST placePawn
-# startingPlayer ="x" , aiPlayer = "o" - this will be flipped based on the players turns or ai turn
-# temp = placePawn(aiPlayer,(0,0)) # this is basically the position of the pawn that the pplyer is gona choose.
-# print(temp)
-# temp = placePawn((0,1))
-# print(temp)
-# temp = placePawn((2,0))
-# print(temp)
-
-
-# task 2 -> able to place walls in its correct postion
+# placeWall('o', (0,1), "V")
+# # fills: (0,1), (1,1), (2,1)
+# print(copyBoard)
 
 
-print(f"horizontal_walls:  {initGameState["horizontal_walls"]}")
-print(f"vertical_walls:  {initGameState["vertical_walls"]}")
-
-def placeWall(cuurentPlayer, pos):
-    i, j, k, l,m, n = pos
-    if i % 2 != 0:
-        # player can place a horizontal wall
-        # place wall from i -> j and j-> k
-        copyBoard[i][j], copyBoard[k][l], copyBoard[m][n] = "-", "-", "-"
-        return copyBoard
-# test
-temp = placeWall(startingPlayer, (1,0,1,1,1,2))  # (start, mid, end)
-print(temp)
