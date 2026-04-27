@@ -1,9 +1,19 @@
-#gameboard {
-    width: 630px;
-    height: 630px;
+#main-interface {
+    padding: 30% 30% 30% 30%;
     display: flex;
+    width: 100px;
+    height: 100px;
+}
+
+#gameboard {
+    width: 300px;
+    height: 300px;
+    display: flex;
+    position: relative;
     flex-wrap: wrap;
 }
+
+
 
 .blocks {
     height: 70px;
