@@ -1,211 +1,123 @@
-boardSize = 17
+"""
+backend/bfs.py
 
-def createBoard():
-    return [list('.' * boardSize) for _ in range(boardSize)]
+NOTE: Core BFS logic now lives directly on the Board class in board.py:
+  - board._bfs_has_path(player)  → used internally to validate wall placement
+  - board.bfs_distance(player)   → returns shortest path length, used by MCTS
 
-wallsRemaining = {
-    'x': 10,
-    'o': 10
-}
+This file provides standalone BFS utilities that MCTS can import directly
+for rollout heuristics without needing a full Board instance.
+"""
 
-board = createBoard()
-copyBoard = [row[:] for row in board]
-
-startingPlayer = 'x'
-currentPlayer = startingPlayer
+from collections import deque
 
 
-def initializeBoard(board):
-    board_with_coords = []
-    pawn_positions = []
-    horizontal_walls = []
-    vertical_walls = []
+def bfs_distance(pawns: dict, walls: set, player: int, board_size: int = 9) -> int:
+    """
+    Standalone BFS: returns the shortest path (in steps) from the player's
+    current position to their goal row.
 
-    size = len(board)
+    player 1 → goal is row 0    (started at bottom, moving up)
+    player 2 → goal is row 8    (started at top, moving down)
 
-    for i in range(size):
-        row_with_coords = []
+    Parameters:
+        pawns   : { 1: (row, col), 2: (row, col) }
+        walls   : set of (row, col, orientation) tuples
+        player  : 1 or 2
+        board_size: size of the board (default 9)
 
-        for j in range(size):
-            cell = board[i][j]
-            row_with_coords.append((i, j, cell))
+    Returns:
+        int — number of steps to goal row, or float('inf') if no path
+    """
+    goal_row = 0 if player == 1 else board_size - 1
+    start = pawns[player]
 
-            # Pawn positions (even, even)
-            if i % 2 == 0 and j % 2 == 0:
-                pawn_positions.append((i, j, cell))
+    visited = set()
+    queue = deque()
+    queue.append((start, 0))   # (position, distance)
+    visited.add(start)
 
-            # Horizontal wall anchors (odd row, even col)
-            elif i % 2 != 0 and j % 2 == 0:
-                if j + 2 < size:
-                    horizontal_walls.append((i, j))
+    while queue:
+        (row, col), dist = queue.popleft()
 
-            # Vertical wall anchors (even row, odd col)
-            elif i % 2 == 0 and j % 2 != 0:
-                if i + 2 < size:
-                    vertical_walls.append((i, j))
+        if row == goal_row:
+            return dist
 
-        board_with_coords.append(row_with_coords)
+        for neighbor in _get_neighbors(row, col, walls, board_size):
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, dist + 1))
 
-    return {
-        "board": board_with_coords,
-        "pawns": pawn_positions,
-        "horizontal_walls": horizontal_walls,
-        "vertical_walls": vertical_walls
-    }
-
-def getBoardState():
-    return [row[:] for row in copyBoard]
-
-def placeWall(player, anchor, orientation):
-    i, j = anchor
-
-    # check wall count
-    if wallsRemaining[player] <= 0:
-        return None
-
-    if not isValidWallPlacement(i, j, orientation):
-        return None
-
-    if orientation == "H":
-        copyBoard[i][j] = '-'
-        copyBoard[i][j+1] = '-'
-        copyBoard[i][j+2] = '-'
-
-    elif orientation == "V":
-        copyBoard[i][j] = '|'
-        copyBoard[i+1][j] = '|'
-        copyBoard[i+2][j] = '|'
-
-    wallsRemaining[player] -= 1
-    return copyBoard
-
-def isValidWallPlacement(i, j, orientation):
-    size = boardSize
-
-    if orientation == "H":
-        # odd row, even col
-        if not (i % 2 != 0 and j % 2 == 0):
-            print("Wrong orientation")
-            return False
-
-        if j + 2 >= size:
-            print("Out of bound friend")
-            return False
-
-        # overlap check
-        if copyBoard[i][j] != '.' or copyBoard[i][j+1] != '.' or copyBoard[i][j+2] != '.':
-            print("Can't overlap mate")
-            return False
-        
-        if copyBoard[i-1][j+1] == '|' or copyBoard[i+1][j+1] == '|':
-            return False
-
-    elif orientation == "V":
-        # even row, odd col
-        if not (i % 2 == 0 and j % 2 != 0):
-            print("Wrong orientation")
-            return False
-
-        if i + 2 >= size:
-            print("Out of bound friend")
-            return False
-
-        # overlap check
-        if copyBoard[i][j] != '.' or copyBoard[i+1][j] != '.' or copyBoard[i+2][j] != '.':
-            print("Can't overlap mate")
-            return False
-        
-        # if you try to 
-        if copyBoard[i+1][j-1] == '-' or copyBoard[i+1][j+1] == '-':
-            return False
-        
-    else:
-        return False
-        
-
-    return True
-
-def placeWall(player, anchor, orientation):
-    i, j = anchor
-
-    if not isValidWallPlacement(i, j, orientation):
-        return None
-
-    if orientation == "H":
-        copyBoard[i][j] = '-'
-        copyBoard[i][j+1] = '-'
-        copyBoard[i][j+2] = '-'
-
-    elif orientation == "V":
-        copyBoard[i][j] = '|'
-        copyBoard[i+1][j] = '|'
-        copyBoard[i+2][j] = '|'
-
-    return copyBoard
-
-def findPawn(player):
-    for i in range(boardSize):
-        for j in range(boardSize):
-            if copyBoard[i][j] == player:
-                return (i, j)
-    return None
-
-def movePawn(player, direction):
-    opponent = 'o' if player == 'x' else 'x'
-
-    i, j = findPawn(player)
-
-    if direction == "DOWN":
-        ni, nj = i + 2, j
-
-        # check opponent in front
-        if copyBoard[i+2][j] == opponent:
-            ni = i + 4  # jump
-
-        if ni < boardSize:
-            copyBoard[i][j] = '.'
-            copyBoard[ni][nj] = player
-
-    elif direction == "UP":
-        ni, nj = i - 2, j
-
-        if copyBoard[i-2][j] == opponent:
-            ni = i - 4
-
-        if ni >= 0:
-            copyBoard[i][j] = '.'
-            copyBoard[ni][nj] = player
-
-    elif direction == "RIGHT":
-        ni, nj = i, j + 2
-
-        if copyBoard[i][j+2] == opponent:
-            nj = j + 4
-
-        if nj < boardSize:
-            copyBoard[i][j] = '.'
-            copyBoard[ni][nj] = player
-
-    elif direction == "LEFT":
-        ni, nj = i, j - 2
-
-        if copyBoard[i][j-2] == opponent:
-            nj = j - 4
-
-        if nj >= 0:
-            copyBoard[i][j] = '.'
-            copyBoard[ni][nj] = player
-
-    return copyBoard
+    return float('inf')
 
 
-# placePawn('x', (0,0))
-# placePawn('o', (2,2))
-# placeWall('x', (1,0), "H")  
-# # fills: (1,0), (1,1), (1,2)
-
-# placeWall('o', (0,1), "V")
-# # fills: (0,1), (1,1), (2,1)
-# print(copyBoard)
+def bfs_has_path(pawns: dict, walls: set, player: int, board_size: int = 9) -> bool:
+    """
+    Standalone BFS: returns True if the player has any path to their goal row.
+    Used inside board.is_valid_wall() to validate wall placements.
+    """
+    return bfs_distance(pawns, walls, player, board_size) < float('inf')
 
 
+def _get_neighbors(row: int, col: int, walls: set, board_size: int) -> list:
+    """
+    Returns all cells reachable from (row, col) given the current wall set.
+    Checks each of the 4 directions and whether a wall blocks that edge.
+    """
+    neighbors = []
+
+    directions = [
+        (-1,  0),  # Up
+        ( 1,  0),  # Down
+        ( 0, -1),  # Left
+        ( 0,  1),  # Right
+    ]
+
+    for dr, dc in directions:
+        nr, nc = row + dr, col + dc
+
+        # Boundary check
+        if not (0 <= nr < board_size and 0 <= nc < board_size):
+            continue
+
+        # Wall check
+        if _is_wall_between(row, col, nr, nc, walls):
+            continue
+
+        neighbors.append((nr, nc))
+
+    return neighbors
+
+
+def _is_wall_between(r1: int, c1: int, r2: int, c2: int, walls: set) -> bool:
+    """
+    Returns True if there is a wall blocking movement between adjacent
+    cells (r1,c1) and (r2,c2).
+
+    Wall coordinate convention:
+      H wall at (r, c): blocks vertical movement between rows r and r+1,
+                        covering columns c and c+1
+      V wall at (r, c): blocks horizontal movement between cols c and c+1,
+                        covering rows r and r+1
+    """
+    # Moving DOWN (r2 = r1+1)
+    if r2 == r1 + 1 and c2 == c1:
+        return (r1, c1,     "H") in walls or \
+               (r1, c1 - 1, "H") in walls
+
+    # Moving UP (r2 = r1-1)
+    if r2 == r1 - 1 and c2 == c1:
+        return (r2, c1,     "H") in walls or \
+               (r2, c1 - 1, "H") in walls
+
+    # Moving RIGHT (c2 = c1+1)
+    if r2 == r1 and c2 == c1 + 1:
+        return (r1, c1,     "V") in walls or \
+               (r1 - 1, c1, "V") in walls
+
+    # Moving LEFT (c2 = c1-1)
+    if r2 == r1 and c2 == c1 - 1:
+        return (r1, c2,     "V") in walls or \
+               (r1 - 1, c2, "V") in walls
+
+    return False
