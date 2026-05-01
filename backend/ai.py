@@ -1,13 +1,12 @@
 import math
 import random
 from copy import deepcopy
-
 from board import (
     getLegalMoves, movePawn, placeWall,
     bfsDistance, findPawn, OPPONENT
 )
 
-ITERATIONS   = 200   # how many MCTS iterations per move
+ITERATIONS   = 2000   # how many MCTS iterations per move
 C            = 1.41   # exploration constant
 AI_PLAYER    = 'o'
 HUMAN_PLAYER = 'x'
@@ -20,7 +19,12 @@ class MCTSNode:
         self.children      = []
         self.visits        = 0
         self.score         = 0.0
-        self.untried_moves = getLegalMoves(state, state['current_player'])
+        all_moves  = getLegalMoves(state, state['current_player'])
+        pawn_moves = [m for m in all_moves if m['type'] == 'pawn']
+        wall_moves = [m for m in all_moves if m['type'] == 'wall']
+
+        random.shuffle(wall_moves)
+        self.untried_moves = pawn_moves + wall_moves[:10]
 
     def is_fully_expanded(self):
         return len(self.untried_moves) == 0
@@ -56,11 +60,12 @@ def expand(node):
 
 def simulate(node):
     state = node.state
-
     # Terminal state — certain result
     if state['winner'] == AI_PLAYER:
+        print("1")
         return 1.0
     if state['winner'] == HUMAN_PLAYER:
+        print("0")
         return 0.0
 
     return evaluate(state)
@@ -72,8 +77,8 @@ def evaluate(state):
     d_ai    = bfsDistance(state['board'], AI_PLAYER)
     d_human = bfsDistance(state['board'], HUMAN_PLAYER)
 
-    if d_ai    is None: return 0.0   # AI is trapped = loss
-    if d_human is None: return 1.0   # human is trapped = win
+    if d_ai    is None: return 0.0 # AI is trapped = loss
+    if d_human is None: return 1.0 # human is trapped = win
 
     return d_human / (d_ai + d_human)
 
