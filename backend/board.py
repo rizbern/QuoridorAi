@@ -324,7 +324,6 @@ def placeWall(state, player, anchor, orientation):
 
     valid, reason = isValidWallPlacement(board, walls_remaining, player, anchor, orientation)
     if not valid:
-        print(f"Invalid wall: {reason}")
         return None
 
     new_state = deepcopy(state)
@@ -338,26 +337,45 @@ def placeWall(state, player, anchor, orientation):
 # Legal moves (for AI / UI highlighting)
 # ─────────────────────────────────────────────────────────────
 
-def getLegalMoves(state, player):
+def _isValidWallFast(board, walls_remaining, player, anchor, orientation):
+    """Fast wall check skipping BFS — used by MCTS."""
+    i, j = anchor
+    if walls_remaining[player] <= 0:
+        return False
+    if orientation == 'H':
+        if i % 2 == 0 or j % 2 != 0: return False
+        if j + 2 >= BOARD_SIZE: return False
+        if board[i][j] != '.' or board[i][j+1] != '.' or board[i][j+2] != '.': return False
+    elif orientation == 'V':
+        if i % 2 != 0 or j % 2 == 0: return False
+        if i + 2 >= BOARD_SIZE: return False
+        if board[i][j] != '.' or board[i+1][j] != '.' or board[i+2][j] != '.': return False
+    else:
+        return False
+    return True
+
+
+def getLegalMoves(state, player, fast=False):
     """
-    Return all legal moves for player as a list of dicts:
-      {'type': 'pawn', 'target': (row, col)}
-      {'type': 'wall', 'anchor': (i, j), 'orientation': 'H'|'V'}
+    Return all legal moves for player.
+    fast=True  — skips BFS path check, used inside MCTS for speed.
+    fast=False — full validation including BFS, used for final move execution.
     """
     board           = state['board']
     walls_remaining = state['walls_remaining']
     moves           = []
 
-    # Pawn moves
     for (r, c) in getLegalPawnMoves(board, player):
         moves.append({'type': 'pawn', 'target': (r, c)})
 
-    # Wall moves (only if player has walls left)
     if walls_remaining[player] > 0:
         for i in range(BOARD_SIZE):
             for j in range(BOARD_SIZE):
                 for ori in ('H', 'V'):
-                    valid, _ = isValidWallPlacement(board, walls_remaining, player, (i, j), ori)
+                    if fast:
+                        valid = _isValidWallFast(board, walls_remaining, player, (i, j), ori)
+                    else:
+                        valid, _ = isValidWallPlacement(board, walls_remaining, player, (i, j), ori)
                     if valid:
                         moves.append({'type': 'wall', 'anchor': (i, j), 'orientation': ori})
 
@@ -397,4 +415,3 @@ if __name__ == '__main__':
     state3['board'][0][8] = '.'
     state3['board'][16][8] = 'x'
     print(f"\nWin check (x at row 16): {checkWin(state3['board'], 'x')}")
-    
