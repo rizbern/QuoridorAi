@@ -15,50 +15,59 @@ HUMAN_PLAYER = 'x'
 
 # ─────────────────────────────────────────────
 # MCTSNode
+# Adopted from reference: lazy untried_actions
 # ─────────────────────────────────────────────
 
 class MCTSNode:
-    def __init__(self, state, parent=None, move=None, good_walls=None):
-        self.state    = state
-        self.parent   = parent
-        self.move     = move
-        self.children = []
-        self.visits   = 0
-        self.score    = 0.0
-
-        all_moves  = getLegalMoves(state, state['current_player'], fast=True)
-        pawn_moves = [m for m in all_moves if m['type'] == 'pawn']
-        wall_moves = [m for m in all_moves if m['type'] == 'wall']
-
-        # Root AI node: use pre-filtered good walls passed in from get_ai_move
-        # good_walls=[]  → no wall passes opp_slowdown>=2, pawn moves only
-        # good_walls=None → child node, use fast proximity sort
-        if parent is None and state['current_player'] == AI_PLAYER:
-            wall_moves = good_walls if good_walls else []
-        else:
-            human_pos  = findPawn(state['board'], HUMAN_PLAYER)
-            human_goal = GOAL_ROW[HUMAN_PLAYER]
-            if human_pos:
-                hr, hc = human_pos
-                wall_moves.sort(key=lambda m: (
-                    abs(m['anchor'][0] - human_goal) + abs(m['anchor'][1] - hc) * 0.5
-                ))
-            else:
-                random.shuffle(wall_moves)
-            # Cap at 6 walls for child nodes — keeps tree from going too wide
-            wall_moves = wall_moves[:6]
-
-        self.untried_moves = pawn_moves + wall_moves
+    def __init__(self, state, parent=None, move=None):
+        self.state         = state
+        self.parent        = parent
+        self.move          = move
+        self.children      = []
+        self.wins          = 0      # reference style: binary wins
+        self.visits        = 0
+        self.untried_moves = None   # LAZY — initialized on first expand()
 
     def is_fully_expanded(self):
+        # Not expanded at all yet → not fully expanded
+        if self.untried_moves is None:
+            return False
         return len(self.untried_moves) == 0
 
     def ucb1(self):
         if self.visits == 0:
             return float('inf')
-        exploitation = self.score / self.visits
+        exploitation = self.wins / self.visits
         exploration  = C * math.sqrt(math.log(self.parent.visits) / self.visits)
         return exploitation + exploration
+
+    def board_signature(self):
+        """Compact signature for subtree reuse matching."""
+        b = self.state['board']
+        pawns = (findPawn(b, 'x'), findPawn(b, 'o'))
+        walls = tuple(
+            (i, j)
+            for i in range(BOARD_SIZE)
+            for j in range(BOARD_SIZE)
+            if b[i][j] in ('-', '|')
+        )
+        return (pawns, walls, self.state['current_player'])
+
+    def find_child_by_state(self, target_state):
+        """
+        Reference approach: reuse subtree from previous turn.
+        Search children for a matching board state.
+        """
+        target_board = target_state['board']
+        target_pawns = (findPawn(target_board, 'x'), findPawn(target_board, 'o'))
+        target_cp    = target_state['current_player']
+
+        for child in self.children:
+            cb    = child.state['board']
+            cpawns = (findPawn(cb, 'x'), findPawn(cb, 'o'))
+            if cpawns == target_pawns and child.state['current_player'] == target_cp:
+                return child
+        return None
 
 
 # ─────────────────────────────────────────────
@@ -72,10 +81,37 @@ def select(node):
 
 
 # ─────────────────────────────────────────────
-# expand
+# expand — lazy move generation (reference pattern)
 # ─────────────────────────────────────────────
 
-def expand(node):
+def expand(node, good_walls=None):
+    # First visit: initialize untried_moves now (not in __init__)
+    if node.untried_moves is None:
+        all_moves  = getLegalMoves(node.state, node.state['current_player'], fast=True)
+        pawn_moves = [m for m in all_moves if m['type'] == 'pawn']
+        wall_moves = [m for m in all_moves if m['type'] == 'wall']
+
+        # Root AI node: use pre-filtered walls
+        if node.parent is None and node.state['current_player'] == AI_PLAYER:
+            wall_moves = good_walls if good_walls else []
+        else:
+            # Child nodes: proximity sort, cap at 6
+            human_pos  = findPawn(node.state['board'], HUMAN_PLAYER)
+            human_goal = GOAL_ROW[HUMAN_PLAYER]
+            if human_pos:
+                hr, hc = human_pos
+                wall_moves.sort(key=lambda m: (
+                    abs(m['anchor'][0] - human_goal) + abs(m['anchor'][1] - hc) * 0.5
+                ))
+            else:
+                random.shuffle(wall_moves)
+            wall_moves = wall_moves[:6]
+
+        node.untried_moves = pawn_moves + wall_moves
+
+    if not node.untried_moves:
+        return node
+
     move = node.untried_moves.pop(random.randrange(len(node.untried_moves)))
 
     if move['type'] == 'pawn':
@@ -95,13 +131,53 @@ def expand(node):
 
 # ─────────────────────────────────────────────
 # simulate
+# Hybrid: short BFS-guided rollout then evaluate
+# Reference showed pure rollout works but is slow in Quoridor
+# We keep BFS eval but add a short rollout when close to goal
 # ─────────────────────────────────────────────
 
 def simulate(node, last_ai_pos=None):
     state = node.state
-    if state['winner'] == AI_PLAYER:    return 1.0
-    if state['winner'] == HUMAN_PLAYER: return 0.0
+
+    if state['winner'] == AI_PLAYER:    return 1
+    if state['winner'] == HUMAN_PLAYER: return 0
+
+    d_ai    = bfsDistance(state['board'], AI_PLAYER)
+    d_human = bfsDistance(state['board'], HUMAN_PLAYER)
+
+    if d_ai    is None: return 0
+    if d_human is None: return 1
+
+    # Close to terminal — do a short random rollout (reference pattern)
+    # Gets more accurate signal than heuristic when outcome is near
+    if d_ai <= 2 or d_human <= 2:
+        return _rollout(state)
+
     return evaluate(state, last_ai_pos=last_ai_pos)
+
+
+def _rollout(state, max_moves=10):
+    """Short random rollout for near-terminal positions (reference pattern)."""
+    from copy import deepcopy
+    cur = deepcopy(state)
+    for _ in range(max_moves):
+        if cur['winner']:
+            break
+        moves = getLegalMoves(cur, cur['current_player'], fast=True)
+        if not moves:
+            break
+        m = random.choice(moves[:8])   # cap branching
+        if m['type'] == 'pawn':
+            r, c = m['target']
+            ns = movePawn(cur, cur['current_player'], r, c)
+        else:
+            ns = placeWall(cur, cur['current_player'], m['anchor'], m['orientation'])
+        if ns:
+            cur = ns
+
+    if cur['winner'] == AI_PLAYER:    return 1
+    if cur['winner'] == HUMAN_PLAYER: return 0
+    return evaluate(cur)   # fallback to heuristic at end of rollout
 
 
 def evaluate(state, last_ai_pos=None):
@@ -114,16 +190,13 @@ def evaluate(state, last_ai_pos=None):
     if d_ai    == 0:    return 1.0
     if d_human == 0:    return 0.0
 
-    # Immediate win/loss
     if d_ai    == 1: return 0.95
     if d_human == 1: return 0.05
 
     w = state['walls_remaining']
 
-    # 1. Path difference (dataset: dist_advantage_before)
     path_diff = d_human - d_ai
 
-    # 2. Raw board progress
     ai_pos    = findPawn(board, AI_PLAYER)
     human_pos = findPawn(board, HUMAN_PLAYER)
     ai_row    = ai_pos[0]    if ai_pos    else 16
@@ -132,17 +205,14 @@ def evaluate(state, last_ai_pos=None):
     human_progress = human_row / 16
     progress_diff  = ai_progress - human_progress
 
-    # 3. Anti-oscillation: penalise if AI returned to its previous position
+    # Anti-oscillation penalty
     oscillation_penalty = 0.0
     if last_ai_pos and ai_pos and ai_pos == last_ai_pos:
         oscillation_penalty = -1.5
 
-    # 4. Wall advantage — only relevant when not losing
     wall_diff   = w[AI_PLAYER] - w[HUMAN_PLAYER]
     wall_weight = 0.4 if path_diff >= 0 else 0.1
-
-    # 5. Game phase for sigmoid sharpness
-    game_phase = (ai_progress + human_progress) / 2
+    game_phase  = (ai_progress + human_progress) / 2
 
     score = (
         2.0 * path_diff          +
@@ -152,20 +222,31 @@ def evaluate(state, last_ai_pos=None):
     )
 
     sharpness = 0.8 + 0.5 * game_phase
-    return 1 / (1 + math.exp(-sharpness * score))
+    return 1 / (1 + __import__('math').exp(-sharpness * score))
 
 
 # ─────────────────────────────────────────────
-# backpropagate
+# backpropagate — reference style: binary win
+# win = 1 if result > 0.5 (AI won), else 0
+# Cleaner than float accumulation
 # ─────────────────────────────────────────────
 
-def backpropagate(node, score):
+def backpropagate(node, result):
+    """
+    Reference pattern: binary wins.
+    result is 1 (AI win), 0 (human win), or float from evaluate.
+    Convert float to win/loss relative to who just moved.
+    """
     while node is not None:
         node.visits += 1
+        # Win for the player who just moved INTO this node
+        # i.e. the opponent of current_player (who is about to move)
         if node.state['current_player'] == AI_PLAYER:
-            node.score += score
+            # Human just moved here — human wins if result < 0.5
+            node.wins += 1 if result < 0.5 else 0
         else:
-            node.score += (1 - score)
+            # AI just moved here — AI wins if result > 0.5
+            node.wins += 1 if result > 0.5 else 0
         node = node.parent
 
 
@@ -178,26 +259,41 @@ def best_child(root):
 
 
 # ─────────────────────────────────────────────
-# mcts
+# mcts — with subtree reuse (reference pattern)
 # ─────────────────────────────────────────────
 
+_root_cache = None   # retained between turns for subtree reuse
+
+
 def mcts(state, good_walls=None, last_ai_pos=None, iterations=ITERATIONS):
-    root = MCTSNode(state, good_walls=good_walls)
+    global _root_cache
+
+    # Subtree reuse: check if current state matches any child of last root
+    root = None
+    if _root_cache is not None:
+        root = _root_cache.find_child_by_state(state)
+        if root is not None:
+            root.parent = None   # detach from old tree
+            print(f"  [MCTS] Reusing subtree ({root.visits} prior visits)")
+
+    if root is None:
+        root = MCTSNode(state)
 
     for _ in range(iterations):
         node = select(root)
-        if node.untried_moves and node.state['winner'] is None:
-            node = expand(node)
-        score = simulate(node, last_ai_pos=last_ai_pos)
-        backpropagate(node, score)
 
+        if not node.is_fully_expanded() and node.state['winner'] is None:
+            node = expand(node, good_walls=good_walls if node.parent is None else None)
+
+        result = simulate(node, last_ai_pos=last_ai_pos)
+        backpropagate(node, result)
+
+    _root_cache = root
     return best_child(root)
 
 
 # ─────────────────────────────────────────────
-# Wall pre-filter — runs once per AI turn
-# Dataset insight: opp_slowdown >= 2 is the threshold for a good wall
-# Walls that add only 0-1 steps to opponent are labelled bad in dataset
+# Wall pre-filter
 # ─────────────────────────────────────────────
 
 def _prefilter_walls(state):
@@ -212,7 +308,6 @@ def _prefilter_walls(state):
     d_ai_base    = bfsDistance(board, AI_PLAYER)    or 99
     d_human_base = bfsDistance(board, HUMAN_PLAYER) or 99
 
-    # All fast-valid walls sorted toward human goal
     walls = []
     for i in range(BOARD_SIZE):
         for j in range(BOARD_SIZE):
@@ -226,9 +321,6 @@ def _prefilter_walls(state):
             abs(m['anchor'][0] - human_goal) + abs(m['anchor'][1] - hc) * 0.5
         ))
 
-    # Adaptive threshold based on urgency:
-    # Dataset shows opp_slowdown>=2 is ideal, but when human is 1-2 steps
-    # from winning, even a +1 slowdown is critical — better than nothing.
     threshold = 2 if d_human_base > 2 else 1
 
     good = []
@@ -256,12 +348,10 @@ def get_ai_move(state, last_ai_pos=None):
     best = mcts(state, good_walls=good_walls, last_ai_pos=last_ai_pos)
     move = best.move
 
-    # Hard block: if MCTS picked a move that returns AI to its last position,
-    # override it with the next best child that doesn't oscillate
-    if (last_ai_pos and move and move['type'] == 'pawn'):
+    # Anti-oscillation hard block
+    if last_ai_pos and move and move['type'] == 'pawn':
         r, c = move['target']
         if (r, c) == last_ai_pos:
-            # Find next most visited child that isn't going back
             root_children = sorted(
                 best.parent.children if best.parent else [],
                 key=lambda n: n.visits, reverse=True
@@ -296,38 +386,44 @@ def get_ai_move(state, last_ai_pos=None):
 
 if __name__ == '__main__':
     import time
-    from board import initGame
+    from board import initGame, movePawn as mp, findPawn
 
-    print("=== Game start (both at center, no good walls) ===")
+    print("=== Proper game flow (x moves first, then AI) ===")
     state = initGame()
-    walls = _prefilter_walls(state)
-    print(f"Good walls: {len(walls)}")
+
+    # Human moves first
+    state = mp(state, 'x', 2, 8)
+    print(f"x moved to (1,4). current_player={state['current_player']}")
+
     t = time.time()
     move = get_ai_move(state)
     print(f"AI chose: {move}  ({time.time()-t:.2f}s)")
 
-    print("\n=== AI far behind (X at row 3, should run) ===")
-    state2 = initGame()
-    state2['board'][0][8] = '.'
-    state2['board'][6][8] = 'x'
-    state2['current_player'] = 'o'
-    walls2 = _prefilter_walls(state2)
-    print(f"Good walls: {len(walls2)}")
+    print("\n=== Second AI turn (subtree reuse test) ===")
+    if move['type'] == 'pawn':
+        r, c = move['target']
+        state = mp(state, 'o', r, c)
+    state = mp(state, 'x', 4, 8)   # human moves again
+    state['current_player'] = 'o'
     t = time.time()
-    move2 = get_ai_move(state2)
-    print(f"AI chose: {move2}  ({time.time()-t:.2f}s)  <- should be pawn")
+    move2 = get_ai_move(state)
+    print(f"AI chose: {move2}  ({time.time()-t:.2f}s)")
 
-    print("\n=== X close to goal, AI should block ===")
+    print("\n=== Oscillation test ===")
     state3 = initGame()
     state3['board'][0][8]  = '.'
     state3['board'][16][8] = '.'
-    state3['board'][14][8] = 'x'   # human 1 step from goal
-    state3['board'][8][8]  = 'o'
-    state3['walls_remaining'] = {'x': 8, 'o': 6}
+    state3['board'][8][8]  = 'x'
+    state3['board'][16][6] = 'o'
     state3['current_player'] = 'o'
-    walls3 = _prefilter_walls(state3)
-    print(f"Good walls: {len(walls3)}")
-    for w in walls3[:3]: print(f"  {w}")
-    t = time.time()
-    move3 = get_ai_move(state3)
-    print(f"AI chose: {move3}  ({time.time()-t:.2f}s)  <- should be blocking wall")
+    last = None
+    for i in range(4):
+        prev = findPawn(state3['board'], 'o')
+        m = get_ai_move(state3, last_ai_pos=last)
+        if m and m['type'] == 'pawn':
+            r, c = m['target']
+            ns = mp(state3, 'o', r, c)
+            if ns: state3 = ns
+            last = prev
+        state3['current_player'] = 'o'
+        print(f"  Move {i+1}: {m}")
