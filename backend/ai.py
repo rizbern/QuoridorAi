@@ -24,8 +24,8 @@ class MCTSNode:
         self.parent        = parent
         self.move          = move
         self.children      = []
-        self.wins          = 0      # reference style: binary wins
-        self.visits        = 0
+        self.wins          = 0      # binary check
+        self.visits        = 0      # count of visits from that node
         self.untried_moves = None   # LAZY — initialized on first expand()
 
     def is_fully_expanded(self):
@@ -58,31 +58,23 @@ class MCTSNode:
         Reference approach: reuse subtree from previous turn.
         Search children for a matching board state.
         """
-        target_board = target_state['board']
+        target_board = target_state['board'] 
         target_pawns = (findPawn(target_board, 'x'), findPawn(target_board, 'o'))
         target_cp    = target_state['current_player']
 
         for child in self.children:
-            cb    = child.state['board']
+            cb = child.state['board']
             cpawns = (findPawn(cb, 'x'), findPawn(cb, 'o'))
             if cpawns == target_pawns and child.state['current_player'] == target_cp:
                 return child
         return None
 
 
-# ─────────────────────────────────────────────
-# select
-# ─────────────────────────────────────────────
-
 def select(node):
     while node.is_fully_expanded() and node.children:
         node = max(node.children, key=lambda n: n.ucb1())
     return node
 
-
-# ─────────────────────────────────────────────
-# expand — lazy move generation (reference pattern)
-# ─────────────────────────────────────────────
 
 def expand(node, good_walls=None):
     # First visit: initialize untried_moves now (not in __init__)
