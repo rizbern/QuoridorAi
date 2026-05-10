@@ -63,99 +63,113 @@ def render(state, highlights=None):
     """
     Print the current board state to the terminal.
 
+    Appearance matches the reference style:
+      - Column labels A-I across the top
+      - Row labels 1-9 down the left side
+      - '+' at every intersection point
+      - '.' for empty cells
+      - 'W' for human pawn (white), 'B' for AI pawn (black)
+      - '*' for highlighted valid moves
+      - '---' for horizontal walls, '|' for vertical walls
+      - Dashed border top and bottom
+
     Args:
         state:      the game state dict
-        highlights: list of board coords [(row, col), ...] to mark as '*'
-                    used to show valid pawn moves to the player
+        highlights: list of board coords [(board_row, board_col), ...]
+                    to mark as valid move targets ('*')
+                    NOTE: these are BOARD coords (0-16), not display coords (0-8)
 
     Frontend notes:
         - Board cells are at even row + even col in the 17x17 grid
         - Horizontal walls are at odd row + even col (spans 3 cells wide)
         - Vertical walls are at even row + odd col (spans 3 cells tall)
         - Wall intersections are at odd row + odd col (purely visual)
-        - highlights are in BOARD coords (not display coords)
     """
-    board = state['board']
-    wr    = state['walls_remaining']   # {'x': N, 'o': N}
-    cp    = state['current_player']    # 'x' or 'o'
+    board      = state['board']
+    wr         = state['walls_remaining']
+    cp         = state['current_player']
     highlights = highlights or []
 
+    # ── Header ───────────────────────────────────────────────
     print()
-    # Show wall counts and whose turn it is
-    print(f"  Walls — x: {wr['x']}  |  o: {wr['o']}      Turn: {'YOU (x)' if cp == 'x' else 'CPU (o)'}")
+    print(f"  Walls — W: {wr['x']}  |  B: {wr['o']}      "
+          f"Turn: {'YOU (W)' if cp == 'x' else 'CPU (B)'}")
     print()
 
-    # Column header — display coords 0-8
-    print("     ", end="")
-    for col in range(0, BOARD_SIZE, 2):
-        print(f" {col//2} ", end="")
-    print()
-    print("     " + "---" * 9)
+    # Column labels: A through I, spaced to align with cells
+    # Each cell takes 4 chars wide (e.g. " . +"), last cell takes 3
+    col_labels = "   " + "  ".join(f"  {chr(65+i)} " for i in range(9))
+    print(col_labels)
 
+    # Top border: +---+---+---+ ...
+    top_border = "   +" + "+".join(["---"] * 9) + "+"
+    print(top_border)
+
+    # ── Board rows ───────────────────────────────────────────
     for row in range(BOARD_SIZE):
 
         if row % 2 == 0:
-            # ── Pawn row (board rows 0,2,4,...,16 → display rows 0-8) ──
-            # Each pawn row shows player tokens, empty cells, and vertical walls
+            # ── Pawn row (display rows 1-9) ──────────────────
+            # Format: row_label | cell + cell + ... cell |
+            # Left edge is always '|', right edge is always '|'
+            # Between cells: '|' if vertical wall, '+' otherwise
 
-            print(f" {row//2}  |", end="")  # display row number on left edge
+            display_row = row // 2 + 1   # display rows are 1-indexed
+            line = f"{display_row:2d} |"
 
             for col in range(BOARD_SIZE):
                 cell = board[row][col]
 
                 if col % 2 == 0:
-                    # Even col → playable cell
-                    gRow = row // 2   # display row
-                    gCol = col // 2   # display col
+                    # Playable cell — show pawn, highlight, or dot
+                    br = row          # board row (for highlight lookup)
+                    bc = col          # board col (for highlight lookup)
 
-                    if (gRow, gCol) in highlights:
-                        print(" * ", end="")   # valid move target
+                    if (br, bc) in highlights:
+                        line += " * "   # valid move destination
                     elif cell == 'x':
-                        print(" X ", end="")   # human pawn
+                        line += " W "   # human pawn (White)
                     elif cell == 'o':
-                        print(" O ", end="")   # AI pawn
+                        line += " B "   # AI pawn (Black)
                     else:
-                        print(" . ", end="")   # empty cell
+                        line += " . "   # empty cell
 
                 else:
-                    # Odd col → vertical wall slot between two cells
-                    # '|' means a wall segment is placed here
+                    # Vertical wall slot — '|' if wall, '+' if open
                     if cell == '|':
-                        print("|", end="")
+                        line += "|"     # vertical wall segment
                     else:
-                        print(" ", end="")     # no wall, open passage
+                        line += "+"     # open passage intersection
 
-            print("|")  # right edge
+            line += "|"   # right border
+            print(line)
 
         else:
-            # ── Wall row (board rows 1,3,5,...,15) ──
-            # These rows only contain horizontal wall segments.
-            # No pawns live here — purely walls and gaps.
+            # ── Wall row (between pawn rows) ──────────────────
+            # Format: "   +" + cell segments separated by '+'
+            # Each cell: "---" if H wall, "   " if open, "+++" at corners
+            # Intersections: '+' always (wall or not)
 
-            print("     |", end="")  # left edge (no row number)
+            line = "   +"
 
             for col in range(BOARD_SIZE):
                 cell = board[row][col]
 
                 if col % 2 == 0:
-                    # Even col → horizontal wall cell
-                    # '-' means a wall segment is here
+                    # Horizontal wall cell or open gap
                     if cell == '-':
-                        print("---", end="")
+                        line += "---"   # horizontal wall segment
                     else:
-                        print("   ", end="")   # no wall, open passage
+                        line += "   "   # open gap (no wall)
 
                 else:
-                    # Odd col → wall intersection point
-                    # Fill with '-' only if both neighboring cells are wall segments
-                    # This makes wall rendering continuous: ---+--- instead of --- ---
-                    left  = board[row][col-1] == '-' if col > 0 else False
-                    right = board[row][col+1] == '-' if col+1 < BOARD_SIZE else False
-                    print("-" if (left and right) else " ", end="")
+                    # Intersection point between 4 cells — always '+'
+                    line += "+"
 
-            print("|")  # right edge
+            print(line)
 
-    print("     " + "---" * 9)
+    # Bottom border
+    print(top_border)
     print()
 
 
@@ -284,38 +298,47 @@ def do_pawn_move(state):
     """
     board      = state['board']
 
-    # Get all valid destinations in board coords
+    # Get all valid destinations in board coords (0-16)
     legal      = getLegalPawnMoves(board, 'x')
 
-    # Convert to display coords just for showing the player
-    legal_disp = [(r // 2, c // 2) for r, c in legal]
+    # Convert to display format: col letter (A-I) and row number (1-9)
+    legal_disp = [f"{chr(65 + c//2)}{r//2 + 1}" for r, c in legal]
 
-    print(f"\nLegal moves (row, col): {legal_disp}")
+    print(f"\nLegal moves: {', '.join(legal_disp)}")
 
     # Re-render board with valid cells highlighted as '*'
-    # highlights must be in BOARD coords, not display coords
+    # render() expects BOARD coords in highlights, not display coords
     render(state, highlights=legal)
 
     while True:
-        raw = prompt("Enter destination row,col (or 'b' to go back): ")
-        if raw == 'b':
-            return None   # player cancelled, go back to m/w/q menu
+        raw = prompt("Enter destination as col+row e.g. E3 (or 'b' to go back): ").upper()
+        if raw == 'B':
+            return None   # player cancelled
 
-        coord = parse_coord(raw)
-        if coord is None:
-            print("Bad input. Try: 4 4")
+        # Parse letter+number format e.g. "E3"
+        if len(raw) == 2 and raw[0].isalpha() and raw[1].isdigit():
+            gc = ord(raw[0]) - 65        # A=0 ... I=8
+            gr = int(raw[1]) - 1         # 1-indexed → 0-indexed
+        elif len(raw) == 3 and raw[0].isalpha() and raw[1:].isdigit():
+            gc = ord(raw[0]) - 65
+            gr = int(raw[1:]) - 1
+        else:
+            print("Bad input. Try: E3 or D4")
+            continue
+
+        if not (0 <= gr <= 8 and 0 <= gc <= 8):
+            print("Out of range. Rows 1-9, cols A-I.")
             continue
 
         # Convert display coords to board coords for movePawn()
-        br, bc = board_to_grid(*coord)
+        br, bc = board_to_grid(gr, gc)
 
-        # movePawn validates legality internally and returns None if illegal
         new_state = movePawn(state, 'x', br, bc)
         if new_state is None:
-            print(f"Illegal move. Legal moves are: {legal_disp}")
+            print(f"Illegal move. Legal moves are: {', '.join(legal_disp)}")
             continue
 
-        return new_state   # valid move — new state with updated pawn position
+        return new_state
 
 
 def do_wall_move(state):
@@ -348,27 +371,39 @@ def do_wall_move(state):
         None            → wall was invalid (overlaps, traps a player, out of bounds)
     """
     print("\nWall placement:")
-    print("  Anchor is the TOP-LEFT corner of the wall in display coords (0-8)")
-    print("  H wall blocks movement between row N and row N+1")
-    print("  V wall blocks movement between col N and col N+1")
-    print("  Example: '3 4 H'  or  '2 2 V'")
+    print("  Use column letter (A-I) and row number (1-9)")
+    print("  H wall: blocks the gap BELOW row N, starting at col X")
+    print("  V wall: blocks the gap RIGHT OF col X, starting at row N")
+    print("  Example: 'E3 H'  blocks below row 3 at col E")
+    print("           'C5 V'  blocks right of col C at row 5")
     print("  (or 'b' to go back)")
 
     while True:
-        raw = prompt("Enter: row col H/V > ").upper()
+        raw = prompt("Enter: colrow H/V  e.g. E3 H > ").upper()
         if raw == 'B':
-            return None   # player cancelled
+            return None
 
         parts = raw.split()
-        if len(parts) != 3:
-            print("Need exactly 3 values, e.g.: 3 4 H")
+        if len(parts) != 2:
+            print("Need col+row and orientation, e.g.: E3 H")
             continue
 
-        try:
-            gr, gc = int(parts[0]), int(parts[1])   # display coords
-            ori    = parts[2]                         # 'H' or 'V'
-        except ValueError:
-            print("Bad input — row and col must be numbers.")
+        pos = parts[0]
+        ori = parts[1]
+
+        # Parse col letter + row number e.g. "E3"
+        if len(pos) == 2 and pos[0].isalpha() and pos[1].isdigit():
+            gc = ord(pos[0]) - 65        # A=0 ... I=8
+            gr = int(pos[1]) - 1         # 1-indexed → 0-indexed
+        elif len(pos) == 3 and pos[0].isalpha() and pos[1:].isdigit():
+            gc = ord(pos[0]) - 65
+            gr = int(pos[1:]) - 1
+        else:
+            print("Bad position. Try: E3 or D4")
+            continue
+
+        if not (0 <= gr <= 8 and 0 <= gc <= 8):
+            print("Out of range. Rows 1-9, cols A-I.")
             continue
 
         if ori not in ('H', 'V'):
@@ -376,20 +411,19 @@ def do_wall_move(state):
             continue
 
         # Convert display coords to board anchor coords
-        # H wall: sits in the odd row BELOW display row gr
-        # V wall: sits in the odd col to the RIGHT of display col gc
+        # H wall: sits in the odd row BELOW display row gr → board row = gr*2 + 1
+        # V wall: sits in the odd col RIGHT OF display col gc → board col = gc*2 + 1
         if ori == 'H':
-            anchor = (gr * 2 + 1, gc * 2)   # odd board row, even board col
+            anchor = (gr * 2 + 1, gc * 2)    # odd board row, even board col
         else:
-            anchor = (gr * 2, gc * 2 + 1)   # even board row, odd board col
+            anchor = (gr * 2, gc * 2 + 1)    # even board row, odd board col
 
-        # placeWall validates everything: bounds, overlap, path-blocking (BFS)
         new_state = placeWall(state, 'x', anchor, ori)
         if new_state is None:
             print("Invalid wall — blocked, out of bounds, or would trap a player. Try again.")
             continue
 
-        return new_state   # wall placed successfully
+        return new_state
 
 
 # ─────────────────────────────────────────────────────────────
@@ -405,11 +439,12 @@ def do_wall_move(state):
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    print("=" * 40)
-    print("         QUORIDOR — Terminal")
-    print("  You = X (top, going DOWN to row 8)")
-    print("  CPU = O (bottom, going UP to row 0)")
-    print("=" * 40)
+    print("=" * 44)
+    print("           QUORIDOR — Terminal")
+    print("  You = W  (row 1, moving DOWN to row 9)")
+    print("  CPU = B  (row 9, moving UP  to row 1)")
+    print("  Cols: A-I   Rows: 1-9")
+    print("=" * 44)
 
     # initGame() returns the starting state dict:
     #   x at display (0,4) = board (0,8)
@@ -464,28 +499,21 @@ def main():
 
             if move['type'] == 'pawn':
                 r, c  = move['target']   # board coords
-
-                # Apply the AI's pawn move
-                # movePawn switches current_player to 'x' after applying
                 state = movePawn(state, 'o', r, c)
-
-                # Store where AI just was so next turn it won't go back there
                 last_ai_pos = prev_ai_pos
-
-                # Display coords for logging (board // 2)
-                print(f"CPU moved pawn to ({r//2}, {c//2})")
+                # Convert board coords to A-I / 1-9 for display
+                col_letter = chr(65 + c // 2)   # 0→A, 1→B ... 8→I
+                row_number = r // 2 + 1          # 0→1 ... 8→9
+                print(f"CPU moved pawn to {col_letter}{row_number}")
 
             else:
-                # AI chose to place a wall
-                # placeWall switches current_player to 'x' after applying
                 state = placeWall(state, 'o', move['anchor'], move['orientation'])
-
-                # Reset oscillation tracking — not relevant after a wall move
                 last_ai_pos = None
-
-                # Log the wall placement in board coords
                 ar, ac = move['anchor']
-                print(f"CPU placed {move['orientation']} wall at anchor ({ar}, {ac})")
+                # Convert board anchor to display coords for logging
+                col_letter = chr(65 + ac // 2)
+                row_number = ar // 2 + 1
+                print(f"CPU placed {move['orientation']} wall at {col_letter}{row_number}")
 
 
 if __name__ == '__main__':
