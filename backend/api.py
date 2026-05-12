@@ -15,7 +15,7 @@ from board import (
     initGame, findPawn, getLegalPawnMoves,
     movePawn, placeWall, BOARD_SIZE, isValidWallPlacement
 )
-from mcts import get_ai_move
+from ai import get_ai_move
 
 app = FastAPI(title="Quoridor API")
 
