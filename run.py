@@ -68,22 +68,22 @@ def _register_alias(real_name: str, alias: str, search_dir: Path) -> None:
 
 _register_alias("ai", "mcts", BACKEND)
 
-# ── Create bfs.py / mcts.py shims on disk if absent ─────────────────────────
-# Some code paths check for these files by name even though all logic lives
-# in ai.py. One-line re-export shims satisfy those checks without duplicating
-# any code.
-for _shim in ("bfs", "mcts"):
-    _shim_path = BACKEND / f"{_shim}.py"
-    if not _shim_path.exists():
-        _shim_path.write_text(
-            "# Auto-generated shim — all logic lives in ai.py\n"
-            "from ai import *  # noqa: F401,F403\n"
-        )
-        print(f"[run.py] Created shim: backend/{_shim}.py -> ai.py")
+# # ── Create bfs.py / mcts.py shims on disk if absent ─────────────────────────
+# # Some code paths check for these files by name even though all logic lives
+# # in ai.py. One-line re-export shims satisfy those checks without duplicating
+# # any code.
+# for _shim in ("bfs", "mcts"):
+#     _shim_path = BACKEND / f"{_shim}.py"
+#     if not _shim_path.exists():
+#         _shim_path.write_text(
+#             "# Auto-generated shim — all logic lives in ai.py\n"
+#             "from ai import *  # noqa: F401,F403\n"
+#         )
+#         print(f"[run.py] Created shim: backend/{_shim}.py -> ai.py")
 
-# ── Import the FastAPI app from backend/api.py ─────────────────────────────────
+# # ── Import the FastAPI app from backend/api.py ─────────────────────────────────
 try:
-    from api import app as fastapi_app
+    from backend.api import app as fastapi_app
 except ImportError as exc:
     sys.exit(
         f"[run.py] Failed to import backend/api.py: {exc}\n"
