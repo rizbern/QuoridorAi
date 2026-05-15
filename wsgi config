@@ -1,0 +1,4 @@
+import sys
+sys.path.insert(0, '/home/rizbernpy/mysite/backend')
+
+from api import app as application
