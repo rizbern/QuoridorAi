@@ -7,7 +7,7 @@ from board import (
     BOARD_SIZE, isValidWallPlacement
 )
 
-ITERATIONS   = 1000
+ITERATIONS   = 5000 # previously 1000 iterations caused oscillation issues ie ai used to move back and forth wasting it's turn
 C            = 1.41
 AI_PLAYER    = 'o'
 HUMAN_PLAYER = 'x'
